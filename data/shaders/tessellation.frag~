@@ -1,0 +1,261 @@
+#version  430 compatibility
+
+
+const float pi = 3.14159;
+
+
+out vec4 FragColor;
+in vec3 gFacetNormal;
+in vec3 gTriDistance;
+in vec3 gPatchDistance;
+in vec4 gColor;
+in float gPrimitive;
+in vec2 TexCoord_FS_in;
+in vec3 Normal_FS_in;
+in vec3 Position_FS_in;
+
+in vec3 lightv_FS_in;
+
+uniform vec3 LightPosition;
+uniform vec3 gEyeWorldPos;
+
+uniform vec3 DiffuseMaterial;
+uniform vec3 AmbientMaterial;
+
+//attribute vec3 Tangent;
+//attribute vec3 Binormal;
+
+uniform sampler2D baseTexture;
+
+uniform sampler2D oceanHeightmap;
+uniform sampler2D oceanNormal;
+
+const int numWaves = 30;
+
+uniform float time;
+//uniform int numWaves;
+uniform float amplitudes[numWaves];
+uniform float wavelengths[numWaves];
+uniform float speeds[numWaves];
+uniform vec3 directions[numWaves];
+uniform float steepness[numWaves];
+//uniform WaveCharachteristics waves;
+
+/*
+mat3 ComputeFlatTangentSpaceBasis(vec3 Position, vec2 Texcoord)
+{
+    vec3 dxPosition = dFdx(Position);
+    vec3 dyPosition = dFdy(Position);
+    vec2 dxTexcoord = dFdx(Texcoord);
+    vec2 dyTexcoord = dFdy(Texcoord);
+
+    vec3 Tangent   = normalize(dxPosition * dyTexcoord.y + dyPosition * dxTexcoord.y);
+    vec3 Bitangent = normalize(dxPosition * dyTexcoord.x + dyPosition * dxTexcoord.x);
+    vec3 Normal    = normalize(cross(dxPosition, dyPosition));
+
+    return mat3(Tangent, Bitangent, Normal);
+}
+*/
+
+
+
+
+
+vec3 computeNormalEC( vec3 fragVertexEc)
+{
+
+vec3 X = dFdy(fragVertexEc);
+vec3 Y = dFdx(fragVertexEc);
+return normalize( cross(X, Y) );
+
+
+
+
+}
+
+
+
+
+
+vec3 bump_normal(vec3 fragVertex, vec3 fragNormal, float value)
+{
+    vec2 dV = vec2(dFdx(value), dFdy(value));
+ 
+    vec3 dPdx = dFdx(fragVertex);
+    vec3 dPdy = dFdy(fragVertex);  
+ 
+    vec3 dPdz = normalize(fragNormal);
+    dPdy = normalize(cross(dPdz, dPdx));
+    dPdx = normalize(cross(dPdy, dPdz));
+ 
+    vec3 N = normalize(-dV.x * dPdx - dV.y * dPdy + dPdz);
+    return N;
+}
+
+
+
+float amplify(float d, float scale, float offset){
+    d = scale * d + offset;
+    d = clamp(d, 0, 1);
+    d = 1 - exp2(-2*d*d);
+    return d;
+}
+
+
+mat3 ComputeFlatTangentSpaceBasis(vec3 Position, vec2 Texcoord, vec3 Tangent, vec3 Bitangent, vec3 Normal)
+{
+    vec3 dxPosition = dFdx(Position);
+    vec3 dyPosition = dFdy(Position);
+    vec2 dxTexcoord = dFdx(Texcoord);
+    vec2 dyTexcoord = dFdy(Texcoord);
+
+    Tangent   = normalize(dxPosition * dyTexcoord.y + dyPosition * dxTexcoord.y);
+    Bitangent = normalize(dxPosition * dyTexcoord.x + dyPosition * dxTexcoord.x);
+    Normal    = normalize(cross(dxPosition, dyPosition));
+
+    return mat3(Tangent, Bitangent, Normal);
+}
+
+
+vec4 GerstnerNormal(vec3 pos,float time )
+{
+int N = numWaves;
+float S = 1.0;
+
+vec3 normal = vec3(0.0,0.0,0.0);
+vec3 bitangent = vec3(0.0,0.0,0.0);
+vec3 tangent = vec3(0.0,0.0,0.0);
+
+float amp = 0.0;
+float spd = 1.1;
+
+for(int i=0; i<numWaves; ++i)
+{
+	float A = amplitudes[i];
+	float L = wavelengths[i];
+	float P = speeds[i];
+
+	vec3 K = directions[i];   //vec3(sin(D), cos(D), 0.0);
+	float W = 2* pi / L;
+	float Q = P / (W * A * N);
+
+	float phi = W * dot(K.xy, pos.xy) + time * speeds[i];
+	
+	
+	
+	bitangent.x += W * A * Q * K.x * K.x * sin(phi);
+	bitangent.y += W * A * Q * K.x * K.x * sin(phi);
+	bitangent.z += W * A * K.x * cos(phi);
+	
+	tangent.x += W * A * Q * K.x * K.x * sin(phi);
+	tangent.y += W * A * Q * K.x * K.x * sin(phi);
+	tangent.z += W * A * K.x * cos(phi);
+	
+	S *= spd;
+	amp += A;
+}
+
+bitangent = vec3 (1.0 - bitangent.x, -bitangent.y,bitangent.z);
+tangent = vec3(-tangent.x, 1.0 - tangent.y, tangent.z);
+normal = cross(tangent, bitangent);
+
+return vec4(normalize(normal), amp);
+
+
+}
+void calc_normal(in vec2 uv, out vec3 N)
+            {
+             float PI = 3.14159265358979323846264;
+             N = vec3(0.0, 0.0, 1.0);
+             for (int i = 0; i < numWaves; i ++) {
+             float A = amplitudes[i]; // Amplitude
+             float omega = 2.0 * PI / wavelengths[i]; // Frequency
+             float phi = speeds[i] * omega; // Phase
+             float k = steepness[i];
+             
+             float term = omega * dot(vec2(directions[i].x, directions[i].y), uv) + phi * time;
+             float C = cos(term);
+             float S = sin(term);
+             float val = pow(0.5 * (S + 1.0), k - 1.0) * C;
+             val = omega * A * k * val;
+             N += vec3( directions[i].x * val,  0.0 , directions[i].y * val);
+             }
+             N = normalize(N);
+            }
+            
+            
+void main(){
+  
+      vec2 index = TexCoord_FS_in.st;
+      //vec2 index2 = TexCoord_FS_in.st * 3; 
+	  
+	   //index.x +=  time * 0.02;
+	   //index2.y += time * 0.02;
+      
+	     vec3 N;
+	     //calc_normal(index,N);
+	     N = GerstnerNormal(Position_FS_in, time).xyz;
+	     
+             //vec3 specular = vec3(1.0) * pow(clamp(dot(reflect(normalize(lightv_FS_in), N), gEyeWorldPos), 0.0, 1.0), 50.0);
+             //vec3 oceanblue = vec3(0.0, 0.0, 0.2);
+             //vec3 skyblue = vec3(0.39, 0.52, 0.93) * 0.9;
+             //const float R_0 = 0.4;
+             //float fresnel = R_0 + (1.0 - R_0) * pow((1.0 - dot(-normalize(gEyeWorldPos), N)), 5.0);
+             //fresnel = max(0.0, min(fresnel, 1.0));
+             //FragColor = vec4(mix(oceanblue, skyblue, fresnel) + specular, 1.0);
+	    
+	    //vec3 N;
+	    //calc_normal(TexCoord_FS_in.st, N);
+	    //FragColor = vec4(Normal_FS_in,1.0); 
+	    FragColor = vec4(N,1.0); 
+}
+
+
+/*
+
+const vec2 size = vec2(2.0,0.0);
+const ivec3 off = ivec3(-1,0,1);
+
+    vec4 wave = texture(unit_wave, tex_coord);
+    float s11 = wave.x;
+    float s01 = textureOffset(unit_wave, tex_coord, off.xy).x;
+    float s21 = textureOffset(unit_wave, tex_coord, off.zy).x;
+    float s10 = textureOffset(unit_wave, tex_coord, off.yx).x;
+    float s12 = textureOffset(unit_wave, tex_coord, off.yz).x;
+    vec3 va = normalize(vec3(size.xy,s21-s11));
+    vec3 vb = normalize(vec3(size.yx,s12-s10));
+    vec4 bump = vec4( cross(va,vb), s11 );
+
+    
+    
+    
+    ------------------
+    
+    //
+    // Calculate normal of the vertex
+    //
+    float step = 1/1024; //where 1024 is texture width, i.e. heightmap width
+    //calculate the neigbour positions
+    vec4 prev_x = vec4(texCoord.x, 0.0, texCoord.y, 1.0); 
+    vec4 prev_z = vec4(texCoord.x, 0.0, texCoord.y, 1.0);
+    vec4 next_x = vec4(texCoord.x, 0.0, texCoord.y, 1.0); 
+    vec4 next_z = vec4(texCoord.x, 0.0, texCoord.y, 1.0);
+    prev_x.x -= step;    prev_z.z -= step;
+    next_x.x += step;    next_z.z += step;
+    //calculate neighbour heights / positions, with scaling
+    vec4 q;
+    q = texture2D(hmap_texture, prev_x.xz); prev_x.y = ( (q.x + q.y + q.z) / 3.0 ) * y_scale;
+    q = texture2D(hmap_texture, next_x.xz); next_x.y = ( (q.x + q.y + q.z) / 3.0 ) * y_scale;
+    q = texture2D(hmap_texture, prev_z.xz); prev_z.y = ( (q.x + q.y + q.z) / 3.0 ) * y_scale;
+    q = texture2D(hmap_texture, next_z.xz); next_z.y = ( (q.x + q.y + q.z) / 3.0 ) * y_scale;
+      //apply xz scaling
+    prev_x.xz *= xz_scale; next_x.xz *= xz_scale;
+    prev_z.xz *= xz_scale; next_z.xz *= xz_scale;
+    //
+    // we now have four neighbouring vertices, positions calculated. Now we need a normal.
+    vec3 tangent = next_x - prev_x;
+    vec3 bitangent = next_z - prev_z;
+    vec3 normal = normalize( cross(tangent, bitangent) );
+    
+    
+*/
